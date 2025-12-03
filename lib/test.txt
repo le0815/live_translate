@@ -1,0 +1,147 @@
+    import 'dart:async';
+    import 'package:flutter/material.dart';
+    import 'package:record/record.dart';
+    import 'package:googleapis/speech/v1.dart' as speech;
+    import 'package:googleapis_auth/auth_io.dart' as auth;
+    import 'package:grpc/grpc.dart';
+
+    class SpeechToTextService {
+      // Stream Controller để quản lý luồng dữ liệu gửi đến Google
+      final _requestStreamController = StreamController<speech.StreamingRecognizeRequest>();
+      
+      // Stream để lắng nghe kết quả từ Google trả về
+      Stream<speech.StreamingRecognizeResponse>? _responseStream;
+
+      final _audioRecord = AudioRecorder();
+
+      // Hàm khởi tạo kết nối
+      Future<void> initialize() async {
+        // 1. Xác thực
+        // Thay bằng đường dẫn đến file JSON của bạn
+        final serviceAccountJson = "assets/your-gcp-credentials.json"; 
+        final credentials = auth.ServiceAccountCredentials.fromJson(await DefaultAssetBundle.of(context).loadString(serviceAccountJson));
+        final scopes = [speech.SpeechApi.cloudPlatformScope];
+        final authClient = await auth.clientViaServiceAccount(credentials, scopes);
+        final channel = ClientChannel(
+          'speech.googleapis.com',
+          options: ChannelOptions(credentials: ChannelCredentials.secure(
+              accessToken: AccessToken(authClient.credentials.accessToken.data, 
+                                      type: authClient.credentials.accessToken.type, 
+                                      expiry: authClient.credentials.accessToken.expiry)
+          )),
+        );
+        final speechClient = speech.SpeechClient(channel);
+
+        // 2. Tạo luồng nhận dạng
+        _responseStream = speechClient.streamingRecognize(_requestStreamController.stream);
+
+        // 3. Gửi cấu hình ban đầu
+        // Đây là message đầu tiên và BẮT BUỘC phải gửi
+        _requestStreamController.add(speech.StreamingRecognizeRequest(
+          streamingConfig: speech.StreamingRecognitionConfig(
+            config: speech.RecognitionConfig(
+              encoding: speech.RecognitionConfig_AudioEncoding.LINEAR16,
+              sampleRateHertz: 16000, // Tần số lấy mẫu, phải khớp với lúc record
+              languageCode: 'vi-VN',  // Ngôn ngữ cần nhận dạng
+              enableAutomaticPunctuation: true,
+            ),
+            interimResults: true, // Rất quan trọng: để nhận kết quả tạm thời
+          ),
+        ));
+      }
+
+      // Hàm bắt đầu ghi âm và gửi dữ liệu
+      Future<void> startStreaming() async {
+        if (await _audioRecord.hasPermission()) {
+          // Lấy audio stream từ microphone
+          final audioStream = await _audioRecord.startStream(
+            const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 16000),
+          );
+
+          // Lắng nghe audio stream và đẩy dữ liệu vào request stream của Google
+          audioStream.listen((data) {
+            // Đóng gói dữ liệu âm thanh vào message của gRPC
+            _requestStreamController.add(
+              speech.StreamingRecognizeRequest(audioContent: data),
+            );
+          });
+        }
+      }
+
+      // Hàm dừng
+      void stopStreaming() {
+        _audioRecord.stop();
+        _requestStreamController.close();
+      }
+
+      // Getter để UI có thể lắng nghe kết quả
+      Stream<speech.StreamingRecognizeResponse>? get responseStream => _responseStream;
+
+      void dispose() {
+        _audioRecord.dispose();
+        _requestStreamController.close();
+      }
+    }
+    ```
+
+    **Giải thích chi tiết:**
+    *   `_requestStreamController`: Đây là `StreamController` của bạn. Bạn sẽ `add` dữ liệu âm thanh vào đây.
+    *   `speechClient.streamingRecognize()`: Hàm này nhận vào một `Stream` (chính là stream từ `_requestStreamController`) và trả về một `Stream` khác chứa kết quả (`_responseStream`).
+    *   **Message đầu tiên:** Bạn phải gửi một message cấu hình để cho Google biết bạn sắp gửi loại audio nào (PCM 16-bit, tần số 16000Hz, ngôn ngữ 'vi-VN', v.v.).
+    *   **Các message tiếp theo:** Trong `audioStream.listen`, bạn lấy từng mẩu dữ liệu `data` (dạng `List<int>`), gói nó vào `StreamingRecognizeRequest(audioContent: data)` và `add` vào `_requestStreamController`.
+    *   **Lắng nghe kết quả:** Ở trong Widget của bạn, bạn sẽ dùng `StreamBuilder` để lắng nghe `speechService.responseStream` và cập nhật UI mỗi khi có kết quả mới.
+
+#### Bước 4: Xử lý kết quả và Dịch
+
+Trong `StreamBuilder` của bạn:
+
+```dart
+StreamBuilder<speech.StreamingRecognizeResponse>(
+  stream: speechService.responseStream,
+  builder: (context, snapshot) {
+    if (snapshot.hasData) {
+      final response = snapshot.data!;
+      if (response.results.isNotEmpty) {
+        final result = response.results.first;
+        if (result.alternatives.isNotEmpty) {
+          final transcript = result.alternatives.first.transcript;
+          
+          // Hiển thị phụ đề (transcript) lên UI
+          // ... update your Text widget state ...
+
+          // Nếu đây là kết quả cuối cùng của một câu nói
+          if (result.isFinal) {
+            // Gọi hàm dịch thuật
+            translateText(transcript).then((translatedText) {
+              // ... update a different Text widget for translated text ...
+            });
+          }
+        }
+      }
+    }
+    return YourSubtitleWidget(); // Widget hiển thị phụ đề
+  },
+)
+```
+
+Để dịch, bạn cũng có thể dùng Google Cloud Translation API. Nó đơn giản hơn vì chỉ là một request-response thông thường, không phải stream.
+
+```dart
+import 'package:googleapis/translate/v3.dart' as translate;
+
+Future<String> translateText(String textToTranslate) async {
+  // Tương tự, bạn cần xác thực...
+  // ... (code xác thực tương tự Speech-to-Text)
+  final translator = translate.TranslateApi(authClient);
+  final request = translate.TranslateTextRequest(
+    contents: [textToTranslate],
+    targetLanguageCode: 'en', // Ngôn ngữ đích
+    parent: 'projects/your-project-id', // ID dự án của bạn
+  );
+  
+  final response = await translator.projects.translateText(request);
+  if (response.translations != null && response.translations!.isNotEmpty) {
+    return response.translations!.first.translatedText ?? 'Error';
+  }
+  return 'Error translating';
+}
