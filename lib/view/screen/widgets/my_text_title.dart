@@ -9,7 +9,7 @@ class MyTextTitle extends StatelessWidget {
     return Text(text, style: TextStyle(
       fontSize: 18,
       color: Colors.teal,
-      fontWeight: .bold
+      fontWeight: .bold,      
     ),);
   }
 }

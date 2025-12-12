@@ -1,13 +1,17 @@
-import 'dart:convert';
 import 'dart:developer';
 
 import 'package:animate_gradient/animate_gradient.dart';
 import 'package:flutter/material.dart';
+import 'package:live_translate/provider/translate_model.dart';
 import 'package:live_translate/services/audio_service.dart';
 import 'package:live_translate/services/speech_service.dart';
+import 'package:live_translate/services/translate_service.dart';
+import 'package:live_translate/view/screen/widgets/my_dropdown_btn.dart';
 import 'package:live_translate/view/screen/widgets/my_text_title.dart';
 import 'package:live_translate/view/screen/widgets/my_textfield.dart';
 import 'package:live_translate/view/screen/widgets/sizebox_square.dart';
+import 'package:toastification/toastification.dart';
+import 'package:provider/provider.dart';
 
 class Home extends StatefulWidget {
   const Home({super.key});
@@ -19,58 +23,161 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> {
   final TextEditingController originTextController = TextEditingController();
   final TextEditingController translateTextcontroller = TextEditingController();
-  
-  
+  final List<String> listLang = ["vi-VN", "en-US", "cmn-Hans-CN"];
+
+  int origLngIdx = 0;
+  int transLngIdx = 0;
   bool isRecording = false;
+
+  @override
+  void initState() {
+    // TODO: implement initState
+    super.initState();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Padding(
-        padding: EdgeInsetsGeometry.all(10),
-        child: Row(
-          children: [
-            Expanded(
-              child: StreamBuilder(
-                stream: SpeechService.instance.startStream(AudioService.instance.audioStream),
-                builder: (context, asyncSnapshot) {
-                  if (asyncSnapshot.hasData) {
-                    originTextController.text = asyncSnapshot.data ?? "";
-                    // log("data: ${asyncSnapshot.data.toString()}");
-                  }
-                  return SidePanel(
-                    panelName: "Original",
-                    controller: originTextController,
-                  );
-                }
-              ),
-            ),
-            SizeboxSquare(size: 20),
-            Expanded(
-              child: SidePanel(
-                panelName: "Translated",
-                controller: translateTextcontroller,
-              ),
-            ),
-          ],
+    return MaterialApp(
+      theme: ThemeData.light(), // Default light theme
+      darkTheme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: Colors.black,
+        primaryColor: Colors.blueAccent,
+        floatingActionButtonTheme: FloatingActionButtonThemeData(
+          backgroundColor: Colors.blueAccent,
+        ),
+        textTheme: TextTheme(
+          bodyLarge: TextStyle(color: Colors.white),
+          bodyMedium: TextStyle(color: Colors.white70),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.grey[800],
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey),
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        isRecording: isRecording,
-        onTap: (value) {
-          isRecording = value;
+      themeMode: ThemeMode.system, // Automatically switch based on system theme
+      home: ChangeNotifierProvider(
+        create: (context) => TranslateModel.instance,
+        child: Scaffold(
+          body: Padding(
+            padding: EdgeInsetsGeometry.all(10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: StreamBuilder(
+                    stream: SpeechService.instance.startStream(
+                      audioStream: AudioService.instance.audioStream,
+                      languageCode: listLang[origLngIdx],
+                    ),
+                    builder: (context, asyncSnapshot) {
+                      if (asyncSnapshot.hasError) {
+                        showSnackBar(asyncSnapshot);
+                      }
+                      if (asyncSnapshot.hasData) {
+                        originTextController.text = asyncSnapshot.data!;
 
-          if(isRecording)
-          {
-            AudioService.instance.startRecording();
-          }else
-          {
-            AudioService.instance.stopRecording();
-          }
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          translateTextcontroller.text =
+                              originTextController.text;
+                          final myModel = Provider.of<TranslateModel>(
+                            context,
+                            listen: false,
+                          );
+                          myModel.setState();
+                        });
+                      } else {
+                        log("data empty: ${asyncSnapshot.data}");
+                      }
+                      log("data: ${asyncSnapshot.data}");
+                      // orig
+                      return SidePanel(
+                        listLang: listLang,
+                        idx: origLngIdx,
+                        onTap: (value) {
+                          origLngIdx = listLang.indexOf(value);
+                          setState(() {});
+                        },
+                        panelName: "Original",
+                        controller: originTextController,
+                      );
+                    },
+                  ),
+                ),
+                SizeboxSquare(size: 20),
+                Expanded(
+                  // trans
+                  child: Consumer<TranslateModel>(
+                    builder: (context, value, child) {
+                      return FutureBuilder(
+                        future: TranslateService.instance.translate(
+                          origLang: listLang[origLngIdx],
+                          transLang: listLang[transLngIdx],
+                          text: translateTextcontroller.text,
+                        ),
+                        builder: (context, asyncSnapshot) {
+                          log("translated: ${asyncSnapshot.data}");
+                          if (asyncSnapshot.hasData) {
+                            translateTextcontroller.text =
+                                asyncSnapshot.data ?? "";
+                          }
 
-          setState(() {});
-        },
+                          return SidePanel(
+                            listLang: listLang,
+                            idx: transLngIdx,
+                            onTap: (value) {
+                              transLngIdx = listLang.indexOf(value);
+                            },
+                            panelName: "Translated",
+                            controller: translateTextcontroller,
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          floatingActionButton: FloatingActionButton(
+            isRecording: isRecording,
+            onTap: (value) {
+              isRecording = value;
+
+              if (isRecording) {
+                AudioService.instance.startRecording();
+              } else {
+                AudioService.instance.stopRecording();
+                SpeechService.instance.stopStream();
+              }
+
+              setState(() {});
+            },
+          ),
+        ),
       ),
     );
+  }
+
+  void showSnackBar(AsyncSnapshot<String> asyncSnapshot) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      toastification.show(
+        type: ToastificationType.error,
+        style: ToastificationStyle.flat,
+        title: Text("Error!"),
+        description: Text(asyncSnapshot.error.toString()),
+        alignment: Alignment.topLeft,
+        autoCloseDuration: const Duration(seconds: 4),
+        borderRadius: BorderRadius.circular(12.0),
+        boxShadow: lowModeShadow,
+      );
+    });
   }
 }
 
@@ -85,7 +192,6 @@ class FloatingActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // return ImageIcon(AssetImage("assets/icons/static/microphone.png"));
     return isRecording
         ? GestureDetector(
             onTap: () {
@@ -108,7 +214,7 @@ class FloatingActionButton extends StatelessWidget {
               ],
               child: Container(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(50),
+                  borderRadius: BorderRadius.circular(50), // Adapt to theme
                 ),
                 width: 50,
                 height: 50,
@@ -119,8 +225,11 @@ class FloatingActionButton extends StatelessWidget {
             onPressed: () {
               onTap(!isRecording);
             },
-            icon: Icon(Icons.mic, size: 30,),
-            
+            icon: Icon(
+              Icons.mic,
+              size: 30,
+              color: Theme.of(context).primaryColor, // Adapt to theme
+            ),
           );
   }
 }
@@ -128,10 +237,17 @@ class FloatingActionButton extends StatelessWidget {
 class SidePanel extends StatelessWidget {
   final String panelName;
   final TextEditingController controller;
-  const SidePanel({
+  final List<String> listLang;
+  final ValueChanged<String> onTap;
+  final int idx;
+
+  SidePanel({
     super.key,
     required this.panelName,
     required this.controller,
+    required this.onTap,
+    required this.idx,
+    required this.listLang,
   });
 
   @override
@@ -139,7 +255,19 @@ class SidePanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        MyTextTitle(text: panelName),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            MyTextTitle(text: panelName),
+            MyDropdownBtn(
+              idx: idx,
+              items: listLang,
+              onTap: (value) {
+                onTap(value);
+              },
+            ),
+          ],
+        ),
         MyTextfield(controller: controller),
       ],
     );
