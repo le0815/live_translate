@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:live_translate/services/speech_service.dart';
+import 'package:live_translate/services/translate_service.dart';
 import 'package:live_translate/view/screen/home.dart';
 import 'package:toastification/toastification.dart';
 
-void main() {
-  SpeechService.instance.init();
+void main() async{
+  SpeechService.instance.init();  
+  await TranslateService.instance.translate(transLang: "vi", text: "test");
   runApp(const MyApp());
 }
 

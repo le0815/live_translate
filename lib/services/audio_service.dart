@@ -1,40 +1,46 @@
 import 'dart:async';
 import 'dart:developer';
 import 'dart:typed_data';
+import 'package:desktop_audio_capture/system/system_audio_capture.dart';
 import 'package:record/record.dart';
 
 class AudioService {
   static final AudioService instance = AudioService._();
   AudioService._();
-  
-  final AudioRecorder _audioRecorder = AudioRecorder();
+
+  final systemCapture = SystemAudioCapture(
+    config: SystemAudioConfig(sampleRate: 44100, channels: 1),
+  );
   StreamController<Uint8List>? _audioStreamController;
   StreamSubscription? _recordSubscription;
 
-  Stream<Uint8List> get audioStream => _audioStreamController?.stream ?? Stream.empty();
+  Stream<Uint8List> get audioStream =>
+      _audioStreamController?.stream ?? Stream.empty();
 
-  Future<void> startRecording() async {
-    log("start recording");
-    if (await _audioRecorder.hasPermission()) {
+  Future<Stream<Uint8List>> startRecording() async {
+    if (await systemCapture.requestPermissions()) {
       _audioStreamController = StreamController<Uint8List>();
-      log("start stream");
-      final stream = await _audioRecorder.startStream(
-        const RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          sampleRate: 16000,
-          numChannels: 1,
-        ),
-      );
+      log("start audio stream");
 
-      _recordSubscription = stream.listen((data) {
+      await systemCapture.startCapture();
+      
+      _recordSubscription = systemCapture.audioStream!.listen((data) {
         _audioStreamController?.add(data);
-      });
+      });  
+      
+      // Return the actual stream that will receive audio data
+      return _audioStreamController!.stream;
+    }
+    else{
+      log("have no sound permission");
+      // Return an empty stream if permission is denied
+      return Stream.empty();
     }
   }
 
   Future<void> stopRecording() async {
     log("stop stream");
-    await _audioRecorder.stop();
+    await systemCapture.stopCapture();
     await _recordSubscription?.cancel();
     await _audioStreamController?.close();
     _audioStreamController = null;

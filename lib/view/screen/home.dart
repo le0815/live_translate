@@ -25,6 +25,8 @@ class _HomeState extends State<Home> {
   final TextEditingController translateTextcontroller = TextEditingController();
   final List<String> listLang = ["vi-VN", "en-US", "cmn-Hans-CN"];
 
+  Stream<String>? _speechStream;
+
   int origLngIdx = 0;
   int transLngIdx = 0;
   bool isRecording = false;
@@ -72,10 +74,7 @@ class _HomeState extends State<Home> {
               children: [
                 Expanded(
                   child: StreamBuilder(
-                    stream: SpeechService.instance.startStream(
-                      audioStream: AudioService.instance.audioStream,
-                      languageCode: listLang[origLngIdx],
-                    ),
+                    stream: _speechStream,
                     builder: (context, asyncSnapshot) {
                       if (asyncSnapshot.hasError) {
                         showSnackBar(asyncSnapshot);
@@ -117,7 +116,7 @@ class _HomeState extends State<Home> {
                     builder: (context, value, child) {
                       return FutureBuilder(
                         future: TranslateService.instance.translate(
-                          origLang: listLang[origLngIdx],
+                          // origLang: listLang[origLngIdx],
                           transLang: listLang[transLngIdx],
                           text: translateTextcontroller.text,
                         ),
@@ -148,21 +147,38 @@ class _HomeState extends State<Home> {
           floatingActionButton: FloatingActionButton(
             isRecording: isRecording,
             onTap: (value) {
-              isRecording = value;
+              setState(() {
+                isRecording = value;
+              });
 
               if (isRecording) {
-                AudioService.instance.startRecording();
+                _startListening();
               } else {
                 AudioService.instance.stopRecording();
                 SpeechService.instance.stopStream();
+                // Clear the stream when recording stops
+                _speechStream = null;
+                originTextController.clear();
               }
-
-              setState(() {});
             },
           ),
         ),
       ),
     );
+  }
+
+  void _startListening() async {
+    // 1. Await the stream from AudioService
+    final audioStream = await AudioService.instance.startRecording();
+
+    // SpeechService.instance.init();
+    // 2. Pass the obtained stream to SpeechService and update the state
+    setState(() {
+      _speechStream = SpeechService.instance.startStream(
+        audioStream: audioStream,
+        languageCode: listLang[origLngIdx],
+      );
+    });
   }
 
   void showSnackBar(AsyncSnapshot<String> asyncSnapshot) {

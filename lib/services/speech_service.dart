@@ -34,10 +34,11 @@ class SpeechService {
         StreamingRecognitionConfig(
           config: RecognitionConfig(
             encoding: AudioEncoding.LINEAR16,
-            model: RecognitionModel.basic,
+            model: RecognitionModel.latest_long,
             enableAutomaticPunctuation: true,
-            sampleRateHertz: 16000,
+            sampleRateHertz: 44100,
             languageCode: languageCode,
+            
           ),
           interimResults: true,
         ),

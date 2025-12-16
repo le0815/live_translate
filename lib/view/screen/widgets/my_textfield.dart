@@ -10,6 +10,7 @@ class MyTextfield extends StatelessWidget {
       readOnly: true,
       controller: controller,
       decoration: InputDecoration(border: OutlineInputBorder()),
+      maxLines: null,
     );
   }
 }
